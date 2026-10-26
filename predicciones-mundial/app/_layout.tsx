@@ -20,7 +20,13 @@ function Navigation() {
     );
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return <Stack screenOptions={{ headerShown: false }}>
+  <Stack.Screen name="index" />
+  <Stack.Screen name="login" />
+  <Stack.Screen name="registro" />
+  <Stack.Screen name="dashboard" />
+  <Stack.Screen name="octavos" />
+</Stack>;
 }
 
 export default function RootLayout() {
