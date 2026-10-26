@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react";
-import { Link } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import {
-  FlatList,
-  Pressable,
+  ActivityIndicator,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import {
+  loadWorldCupMatches,
+  type Match,
+} from "../src/services/matches";
 import {
   calculateTeamStats,
   getTeams,
@@ -17,17 +19,28 @@ import {
   predictMatch,
   type Prediction,
 } from "../src/utils/predictions";
+import { setRoundOf16Winners } from "../src/services/bracketStore";
 import {
-  loadWorldCupMatches,
-  type Match,
-} from "../src/services/matches";
-import { useEffect } from "react";
+  colors,
+  radius,
+  spacing,
+} from "../src/utils/theme";
+import {
+  EmptyState,
+  PredictionCard,
+  PrimaryButton,
+  ScreenHeader,
+  ScreenLink,
+  SectionTitle,
+  TeamChips,
+} from "../src/components/ui";
+
+const TEAMS_FOR_ROUND_OF_16 = 16;
 
 export default function Octavos() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
 
@@ -46,17 +59,6 @@ export default function Octavos() {
     load();
   }, []);
 
-  const teams = useMemo(() => {
-    const allTeams = getTeams(matches);
-
-    return allTeams
-      .map((team) => calculateTeamStats(team, matches))
-      .filter((team) =>
-        team.team.toLowerCase().includes(search.trim().toLowerCase())
-      )
-      .sort((a, b) => b.winRate - a.winRate);
-  }, [matches, search]);
-
   const statsByTeam = useMemo(() => {
     const map = new Map<string, TeamStats>();
 
@@ -67,261 +69,138 @@ export default function Octavos() {
     return map;
   }, [matches]);
 
-  function toggleTeam(team: string) {
-    setSelectedTeams((current) => {
-      if (current.includes(team)) {
-        return current.filter((item) => item !== team);
-      }
+  const rankedTeams = useMemo(() => {
+    return Array.from(statsByTeam.values()).sort(
+      (a, b) => b.winRate - a.winRate
+    );
+  }, [statsByTeam]);
 
-      if (current.length >= 16) {
-        return current;
-      }
+  function selectTeamsRandomly() {
+    setError("");
+    setPredictions([]);
 
-      return [...current, team];
-    });
-  }
-
-  function generatePredictions() {
-    if (selectedTeams.length !== 16) {
-      setError("Selecciona exactamente 16 selecciones.");
+    if (rankedTeams.length < TEAMS_FOR_ROUND_OF_16) {
+      setError("No hay suficientes selecciones con historial mundialista.");
       return;
     }
 
-    setError("");
+    const pool = [...rankedTeams];
+    const selected: TeamStats[] = [];
+
+    while (selected.length < TEAMS_FOR_ROUND_OF_16 && pool.length > 0) {
+      const totalWeight = pool.reduce(
+        (sum, team) => sum + Math.max(team.winRate, 0.01),
+        0
+      );
+
+      let random = Math.random() * totalWeight;
+      let selectedIndex = 0;
+
+      for (let index = 0; index < pool.length; index++) {
+        random -= Math.max(pool[index].winRate, 0.01);
+
+        if (random <= 0) {
+          selectedIndex = index;
+          break;
+        }
+      }
+
+      selected.push(pool[selectedIndex]);
+      pool.splice(selectedIndex, 1);
+    }
+
+    setSelectedTeams(selected.map((team) => team.team));
 
     const pairs: Prediction[] = [];
 
-    for (let index = 0; index < selectedTeams.length; index += 2) {
-      const home = selectedTeams[index];
-      const away = selectedTeams[index + 1];
-
-      const homeStats = statsByTeam.get(home);
-      const awayStats = statsByTeam.get(away);
-
-      if (!homeStats || !awayStats) {
-        setError("No se encontraron estadísticas de una selección.");
-        return;
-      }
-
-      pairs.push(predictMatch(homeStats, awayStats));
+    for (let index = 0; index < selected.length; index += 2) {
+      pairs.push(predictMatch(selected[index], selected[index + 1]));
     }
 
+    const winners = pairs.map(
+      (prediction) => prediction.predictedWinner
+    );
+
+    setRoundOf16Winners(winners);
     setPredictions(pairs);
   }
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <Text style={styles.text}>Cargando estadísticas...</Text>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Cargando estadísticas...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Octavos de final</Text>
-      <Text style={styles.subtitle}>
-        Selecciona 16 selecciones. Se formarán 8 cruces en el orden en que las
-        elijas.
-      </Text>
-
-      <Text style={styles.counter}>
-        Seleccionadas: {selectedTeams.length}/16
-      </Text>
-
-      <TextInput
-        style={styles.search}
-        placeholder="Buscar selección..."
-        placeholderTextColor="#94A3B8"
-        value={search}
-        onChangeText={setSearch}
+    <ScrollView style={styles.container}>
+      <ScreenHeader
+        title="Octavos de final"
+        subtitle="El sistema selecciona 16 selecciones al azar. Las selecciones con mayor tasa de victoria tienen más probabilidad de aparecer."
       />
 
-      <FlatList
-        data={teams}
-        keyExtractor={(item) => item.team}
-        renderItem={({ item }) => {
-          const isSelected = selectedTeams.includes(item.team);
-
-          return (
-            <Pressable
-              style={[styles.teamButton, isSelected && styles.selected]}
-              onPress={() => toggleTeam(item.team)}
-            >
-              <Text style={styles.teamName}>{item.team}</Text>
-              <Text style={styles.teamInfo}>
-                {(item.winRate * 100).toFixed(1)}% victorias
-              </Text>
-            </Pressable>
-          );
-        }}
-        contentContainerStyle={{ paddingBottom: 24 }}
+      <PrimaryButton
+        label="Generar octavos al azar"
+        onPress={selectTeamsRandomly}
       />
 
       {error !== "" && <Text style={styles.error}>{error}</Text>}
 
-      <Pressable
-        style={styles.button}
-        onPress={generatePredictions}
-      >
-        <Text style={styles.buttonText}>Calcular octavos</Text>
-      </Pressable>
-
-      {predictions.length > 0 && (
-        <View style={styles.results}>
-          <Text style={styles.resultsTitle}>Resultados</Text>
-
-          {predictions.map((prediction, index) => (
-            <View key={`${prediction.homeTeam}-${prediction.awayTeam}`} style={styles.matchCard}>
-              <Text style={styles.matchTitle}>
-                Octavos {index + 1}
-              </Text>
-
-              <Text style={styles.matchTeams}>
-                {prediction.homeTeam} vs {prediction.awayTeam}
-              </Text>
-
-              <Text style={styles.probability}>
-                {prediction.homeTeam}:{" "}
-                {(prediction.homeWinProbability * 100).toFixed(1)}%
-              </Text>
-
-              <Text style={styles.probability}>
-                Empate: {(prediction.drawProbability * 100).toFixed(1)}%
-              </Text>
-
-              <Text style={styles.probability}>
-                {prediction.awayTeam}:{" "}
-                {(prediction.awayWinProbability * 100).toFixed(1)}%
-              </Text>
-
-              <Text style={styles.winner}>
-                Ganador previsto: {prediction.predictedWinner}
-              </Text>
-            </View>
-          ))}
-
-          <Link href="/cuartos" style={styles.nextLink}>
-            Continuar a cuartos de final
-          </Link>
+      {selectedTeams.length > 0 && (
+        <View style={styles.section}>
+          <SectionTitle>Selecciones clasificadas</SectionTitle>
+          <TeamChips teams={selectedTeams} />
         </View>
       )}
-    </View>
+
+      {predictions.length > 0 && (
+        <View style={styles.section}>
+          <SectionTitle>Cruces y predicciones</SectionTitle>
+
+          {predictions.map((prediction, index) => (
+            <PredictionCard
+              key={`${prediction.homeTeam}-${prediction.awayTeam}`}
+              prediction={prediction}
+              roundLabel={`Octavos ${index + 1}`}
+            />
+          ))}
+
+          <ScreenLink
+            href="/cuartos"
+            label="Continuar a cuartos de final"
+          />
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0B1120",
-    padding: 20,
+    backgroundColor: colors.background,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   center: {
     flex: 1,
-    backgroundColor: "#0B1120",
+    backgroundColor: colors.background,
     justifyContent: "center",
     alignItems: "center",
+    padding: spacing.lg,
   },
-  title: {
-    color: "#FFFFFF",
-    fontSize: 26,
-    fontWeight: "800",
+  loadingText: {
+    color: colors.textMuted,
+    marginTop: spacing.md,
   },
-  subtitle: {
-    color: "#94A3B8",
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  counter: {
-    color: "#22C55E",
-    fontWeight: "700",
-    marginBottom: 12,
-  },
-  search: {
-    backgroundColor: "#1E293B",
-    color: "#FFFFFF",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-  },
-  teamButton: {
-    backgroundColor: "#111827",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 6,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  selected: {
-    backgroundColor: "#14532D",
-    borderWidth: 1,
-    borderColor: "#22C55E",
-  },
-  teamName: {
-    color: "#FFFFFF",
-    fontWeight: "600",
-  },
-  teamInfo: {
-    color: "#94A3B8",
-    fontSize: 12,
+  section: {
+    marginTop: spacing.lg,
   },
   error: {
-    color: "#FCA5A5",
-    marginTop: 12,
+    color: colors.danger,
+    marginTop: spacing.md,
     textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#22C55E",
-    padding: 16,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 12,
-  },
-  buttonText: {
-    color: "#052E16",
-    fontWeight: "800",
-  },
-  results: {
-    marginTop: 24,
-  },
-  resultsTitle: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "800",
-    marginBottom: 12,
-  },
-  matchCard: {
-    backgroundColor: "#111827",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
-  },
-  matchTitle: {
-    color: "#22C55E",
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  matchTeams: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  probability: {
-    color: "#CBD5E1",
-    fontSize: 13,
-  },
-  winner: {
-    color: "#4ADE80",
-    fontWeight: "700",
-    marginTop: 8,
-  },
-  nextLink: {
-    color: "#93C5FD",
-    textAlign: "center",
-    marginTop: 16,
-  },
-  text: {
-    color: "#FFFFFF",
   },
 });

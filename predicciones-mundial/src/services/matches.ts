@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { translateTeam } from "../utils/teamNames";
 
 export type Match = {
   date: string;
@@ -33,8 +34,8 @@ export async function loadWorldCupMatches(): Promise<Match[]> {
     .filter((row) => row.tournament === "FIFA World Cup")
     .map((row) => ({
       date: row.date,
-      homeTeam: row.home_team,
-      awayTeam: row.away_team,
+      homeTeam: translateTeam(row.home_team),
+      awayTeam: translateTeam(row.away_team),
       homeScore: Number(row.home_score),
       awayScore: Number(row.away_score),
       tournament: row.tournament,

@@ -26,6 +26,10 @@ function Navigation() {
   <Stack.Screen name="registro" />
   <Stack.Screen name="dashboard" />
   <Stack.Screen name="octavos" />
+  <Stack.Screen name="cuartos" />
+  <Stack.Screen name="semifinal" />
+  <Stack.Screen name="final" />
+  <Stack.Screen name="bracket" />
 </Stack>;
 }
 
